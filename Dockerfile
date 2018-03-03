@@ -1,6 +1,6 @@
 FROM ipython/ipython:3.x
 
-MAINTAINER Ryan Kennedy <ryankennedys30@gmail.com>
+MAINTAINER Bob McGrath  bobwmcgrath@gmail.com
 
 VOLUME /notebooks
 WORKDIR /notebooks
@@ -37,14 +37,52 @@ RUN apt-get install -y libjpeg62
 #Install atlas
 RUN apt-get install -y libatlas-base-dev
 
-# Install Caffe
-ADD caffe-master /caffe-master
+# Install Caffe GPU
 
-RUN cd /caffe-master && make && make distribute
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        git \
+        wget \
+        libatlas-base-dev \
+        libboost-all-dev \
+        libgflags-dev \
+        libgoogle-glog-dev \
+        libhdf5-serial-dev \
+        libleveldb-dev \
+        liblmdb-dev \
+        libopencv-dev \
+        libprotobuf-dev \
+        libsnappy-dev \
+        protobuf-compiler \
+        python-dev \
+        python-numpy \
+        python-pip \
+        python-setuptools \
+        python-scipy && \
+    rm -rf /var/lib/apt/lists/*
+    
+    ENV CAFFE_ROOT=/opt/caffe
+WORKDIR $CAFFE_ROOT
 
-# Set caffe to be in the python path
-ENV PYTHONPATH=/caffe-master/distribute/python
-ENV PATH $PATH:/opt/caffe/.build_release/tools
+# FIXME: use ARG instead of ENV once DockerHub supports this
+# https://github.com/docker/hub-feedback/issues/460
+ENV CLONE_TAG=1.0
+
+RUN git clone -b ${CLONE_TAG} --depth 1 https://github.com/BVLC/caffe.git . && \
+    pip install --upgrade pip && \
+    cd python && for req in $(cat requirements.txt) pydot; do pip install $req; done && cd .. && \
+    git clone https://github.com/NVIDIA/nccl.git && cd nccl && make -j install && cd .. && rm -rf nccl && \
+    mkdir build && cd build && \
+    cmake -DUSE_CUDNN=1 -DUSE_NCCL=1 .. && \
+    make -j"$(nproc)"
+
+ENV PYCAFFE_ROOT $CAFFE_ROOT/python
+ENV PYTHONPATH $PYCAFFE_ROOT:$PYTHONPATH
+ENV PATH $CAFFE_ROOT/build/tools:$PYCAFFE_ROOT:$PATH
+RUN echo "$CAFFE_ROOT/build/lib" >> /etc/ld.so.conf.d/caffe.conf && ldconfig
+
+WORKDIR /workspace
 
 # Add ld-so.conf so it can find libcaffe.so
 ADD caffe-ld-so.conf /etc/ld.so.conf.d/
